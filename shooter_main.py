@@ -1,4 +1,4 @@
-import pygame, random, time, sys, math
+import pygame, random, time, sys, math, base64
 
 # check for initializing errors
 check_errors = pygame.init()
@@ -48,10 +48,10 @@ class Player:
         self.y = y
         self.angle = 0
         self.moveSpeed = 5
-        #self.speed = 20
         self.texture = pygame.image.load('char_policemen.png')
         self.cooldownCounter = 0
         self.dropWeapon()
+        self.shotSize = 5
 
 
     def rotate(self):
@@ -67,16 +67,18 @@ class Player:
         playSurface.blit(self.image, imageRect)
         # HealthBarDrawer(pos, team[index].health, team[index].maxHealth)
 
-    def dropWeapon(self): # TODO: written twice - > move pistol stats into own object
-        self.weaponSprite = pygame.image.load('wpn_pistol.png')
-        self.weapon = 'pistol'
+    def dropWeapon(self):
+        self.weaponSprite = pygame.image.load('wpn_revolver.png')
+        self.weapon = 'revolver'
         self.cooldown = 10  # (frames)
-        self.penetration = 2
+        self.reloadTime = 20
+        self.weaponPenetration = 1
         self.ammo = 6
         self.ammoCapacity = 6
-        self.ammoStash = 16
+        self.ammoStash = 999
         self.spread = 0 # in radians
         self.autoFire = False
+        self.shotSize = 5
 
     def shoot(self, bullets=1):
         if player1.cooldownCounter == 0:
@@ -90,9 +92,9 @@ class Player:
             radians = math.atan2(*offset)
             for i in range(bullets):
                 angle = (radians - math.pi) + (random.randint(-self.spread, self.spread)) * 0.1
-                my_shots.append(Projectile(sourceX, sourceY, angle, self.penetration))
+                my_shots.append(Projectile(sourceX, sourceY, angle, self.weaponPenetration, self.shotSize))
             self.ammo -= 1
-            if self.ammo <= 0 and self.ammoStash <= 0 and self.weapon != 'pistol':
+            if self.ammo <= 0 and self.ammoStash <= 0 and self.weapon != 'revolver':
                 self.dropWeapon()
             player1.cooldownCounter = player1.cooldown
 
@@ -101,10 +103,16 @@ class Player:
         if self.ammoStash >= self.ammoCapacity - self.ammo:
             self.ammoStash -= self.ammoCapacity - self.ammo
             self.ammo = self.ammoCapacity
-        else:  # so if stash wouldnt suffice to fill up magazine:
+            self.cooldownCounter = self.reloadTime
+            FX_List.append(fx_reloadBar())
+        elif self.ammoStash <= 0:
+            return
+        else:  # so if stash wouldnt suffice to fill up magazine, but is larger then 0:
             # ammo is equal to stash
             self.ammo += self.ammoStash
             self.ammoStash = 0
+            self.cooldownCounter = self.reloadTime
+            FX_List.append(fx_reloadBar())
 
 # instanciate player
 player1 = Player(playerPos[0], playerPos[1])
@@ -160,11 +168,10 @@ class Drop:
         blit_alpha(playSurface, self.image, imageRect, 100 if self.alpha < 100 else 255)
 
 class Ammo(Drop):
-    def __init__(self, x, y,):
+    def __init__(self, x, y):
         self.x = x
         self.y = y
         self.ammo = 6
-        #self.lifetime = 200
         self.alphaStep = self.alpha / self.lifetime
         self.texture = pygame.image.load('wpn_ammo.png')
         self.image = self.texture
@@ -173,45 +180,77 @@ class Ammo(Drop):
         print('Ammo picked up!')
         player1.ammoStash += self.ammo
 
+class Pistol(Drop):
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+        self.alphaStep = self.alpha / self.lifetime
+        self.texture = pygame.image.load('wpn_pistol.png')
+        self.image = self.texture
+
+    def pickup(self):
+        print('Pistol picked up!')
+        if player1.weapon == 'pistol':
+            player1.ammoStash += 12
+            return
+        player1.weapon = 'pistol'
+        player1.ammo = 12
+        player1.ammoCapacity = 12
+        player1.ammoStash = 0
+        player1.spread = 0
+        player1.weaponPenetration = 3
+        player1.weaponSprite = self.texture
+        player1.cooldown = 1
+        player1.reloadTime = 20
+        player1.shotSize = 6
+
 class Uzi(Drop):
     def __init__(self, x, y):
         self.x = x
         self.y = y
-        #self.lifetime = 200
         self.alphaStep = self.alpha / self.lifetime
         self.texture = pygame.image.load('wpn_uzi.png')
         self.image = self.texture
 
     def pickup(self):
         print('Uzi picked up!')
+        if player1.weapon == 'uzi':
+            player1.ammoStash += 30
+            return
         player1.weapon = 'uzi'
         player1.ammo = 30
         player1.ammoCapacity = 30
         player1.ammoStash = 0
         player1.spread = 2
-        player1.penetration = 2
+        player1.weaponPenetration = 2
         player1.weaponSprite = self.texture
         player1.cooldown = 3
+        player1.reloadTime = 20
+        player1.shotSize = 5
 
 class Shotgun(Drop):
     def __init__(self, x, y):
         self.x = x
         self.y = y
-        #self.lifetime = 200
         self.alphaStep = self.alpha / self.lifetime
         self.texture = pygame.image.load('wpn_shotgun.png')
         self.image = self.texture
 
     def pickup(self):
         print('Shotgun picked up!')
+        if player1.weapon == 'shotgun':
+            player1.ammoStash += 10
+            return
         player1.weapon = 'shotgun'
         player1.ammo = 5
         player1.ammoCapacity = 5
         player1.ammoStash = 5
         player1.spread = 3
-        player1.penetration = 1
+        player1.weaponPenetration = 1
         player1.weaponSprite = self.texture
         player1.cooldown = 20
+        player1.reloadTime = 40
+        player1.shotSize = 3
 
 
 # Projectile Class
@@ -257,6 +296,26 @@ class fx_bloodsplatter(FX):
         self.texture = pygame.image.load('fx_body.png')
         self.texture.set_alpha(100)
         self.image = pygame.transform.rotate(self.texture, int(self.angle))
+
+class fx_reloadBar(FX):
+    def __init__(self):
+        self.alpha = 220  # hack using alpha as percent for this particular effect
+        self.lifetime = player1.reloadTime
+        self.alphaStep = self.alpha / self.lifetime
+        self.coords =   ([180, 400],
+                        [180++self.alpha, 400],
+                        [180+self.alpha, 420],
+                        [180, 420])
+
+        #self.texture = pygame.image.load('fx_body.png')
+        #self.texture.set_alpha(100)
+
+    def render(self):
+        pygame.draw.polygon(playSurface, white, self.coords)
+        self.coords = ([180, 400],
+                       [180 + +self.alpha, 400],
+                       [180 + self.alpha, 420],
+                       [180, 420])
 
 
 FX_List = []
@@ -413,11 +472,12 @@ def showScore(GO=0, playerweapon=''):
     if GO == 0:
         playSurface.blit(ammoSurf, ammoRect)
 
-    ######## render weapon besides ammo:
+    ### render weapon besides ammo:
     texture = player1.weaponSprite
     imageRect = texture.get_rect()
     imageRect.center = (20, 400)
     playSurface.blit(texture, imageRect)
+
 
 # draw with alpha
 def blit_alpha(target, source, location, opacity):
@@ -442,13 +502,13 @@ while True:
         if event.type == pygame.QUIT: #Quit logic
             pygame.quit()
             sys.exit()
-        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1 and player1.ammo: # single shot, if pistol
-            player1.shoot(5 if player1.weapon == 'shotgun' else 1)
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1 and player1.ammo > 0: # single shot, if revolver
+            player1.shoot(8 if player1.weapon == 'shotgun' else 1)
             player1.autoFire = True
         if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
             player1.autoFire = False
 
-    if player1.autoFire and player1.weapon == 'uzi':
+    if player1.autoFire and player1.weapon == 'uzi' and player1.ammo > 0: # Todo: should work with second player param. like 'autofireCapability'
         player1.shoot()
 
     # mouse lookAt constraint
@@ -472,6 +532,7 @@ while True:
         sys.exit()
     if keys[pygame.K_r]:
         player1.reload()
+        player1.cooldownCounter = player1.reloadTime
 
     for e in pygame.event.get():
         if e.type == pygame.QUIT:
@@ -502,17 +563,27 @@ while True:
         for enemy in enemyList:
             if (shot.x > enemy.x-10 and shot.x < enemy.x+10) and (shot.y > enemy.y-10 and shot.y < enemy.y+10):
                 if random.randint(1, 100) < enemy.dropchance:
-                    dropList.append(random.choice([Ammo(enemy.x, enemy.y),
-                                                   Uzi(enemy.x, enemy.y),
-                                                   Shotgun(enemy.x, enemy.y)]))
+                    dropList.append(random.choice([
+                                                    Ammo(enemy.x, enemy.y),
+                                                    Ammo(enemy.x, enemy.y),  # just upping the chance for ammo
+                                                    Pistol(enemy.x, enemy.y),
+                                                    Uzi(enemy.x, enemy.y),
+                                                    Shotgun(enemy.x, enemy.y)
+                                                   ]))
                     print('## DOP DROPPED!')
                 score += enemy.scoreVal
-                shot.penetration -= 1
-                shot.colour = red
                 FX_List.append(fx_bloodsplatter(enemy.x, enemy.y, enemy.angle))
                 enemyList.remove(enemy)
-                if shot.penetration <= 0:
-                    my_shots.remove(shot)
+                shot.penetration -= 1
+                shot.colour = red
+        if shot.penetration <= 0:
+            try:
+                my_shots.remove(shot)
+            except ValueError:  # TODO: BUG PRIO A
+                print('############### WARNING: SHOT NOT IN MY_SHOTS; CANT REMOVE!!! ############')
+                time.sleep(10)
+
+
 
     #check drop pickup
     for drop in dropList:
