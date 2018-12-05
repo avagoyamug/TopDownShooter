@@ -1,3 +1,22 @@
+'''
+##########################################################################################################
+Main Ideas and ToDo:
+- add animation system (general anim func)
+- new weapons, like flamethrower and rocketlauncher
+- new perk-drops (shield,speedboost, infiniteammo, etc...)
+- new monsters
+- encrypt highscore file
+
+Maintanance:
+- ammoWarning system is quite hacked, optimize!
+- make absolute values var's
+- clean up and scale UI
+
+##########################################################################################################
+'''
+
+
+
 import pygame, random, time, sys, math
 
 # check for initializing errors
@@ -16,9 +35,9 @@ cheatMode = True
 
 
 # Play Surface
-PSwith = 600
-PSheight = 600
-playSurface = pygame.display.set_mode((PSwith, PSheight))
+screenWidth = 600
+screenHeight = 600
+playSurface = pygame.display.set_mode((screenWidth, screenHeight))
 pygame.display.set_caption('SHOOTER')
 pygame.event.set_grab(True) # traps the mouse in window
 pygame.mouse.set_cursor(*pygame.cursors.broken_x) # uses predefined pygame cursor tuple
@@ -33,6 +52,7 @@ white = pygame.Color(255,255,255)
 black = pygame.Color(0,0,0)
 grey = pygame.Color(128,128,128)
 brown = pygame.Color(128,120,105)
+darkBlue = pygame.Color(70,80,97)
 alphaGrey = pygame.Color(128,128,128,128)
 alphaBlack = pygame.Color(0,0,0,128)
 alphaRed = pygame.Color(255,0,0,128)
@@ -42,6 +62,8 @@ fpsController = pygame.time.Clock()
 gameTime = 0  # time in frames
 
 # Important Game Vars
+gameClock = (0,0)
+
 playerPos = [230, 230]
 my_shots = []
 score = 0
@@ -50,7 +72,7 @@ pause = False
 enemyList = []
 enemySpawn = True
 enemyCount = 3
-spawnFrequency = 30
+spawnFrequency = 20
 
 dropList = []
 
@@ -69,9 +91,11 @@ class Player:
         self.dropWeapon()
         self.shotSize = 5
 
+        self.ammoWarning = 0
+
     def move(self, keys):
         if keys[pygame.K_RIGHT] or keys[pygame.K_d]:
-            if not self.x > PSwith -10:
+            if not self.x > screenWidth -10:
                 self.x += self.moveSpeed
         if keys[pygame.K_LEFT] or keys[pygame.K_a]:
             if not self.x < 10:
@@ -80,13 +104,14 @@ class Player:
             if not self.y < 10:
                 self.y -= self.moveSpeed
         if keys[pygame.K_DOWN] or keys[pygame.K_s]:
-            if not self.y > PSheight -10:
+            if not self.y > screenHeight -10:
                 self.y += self.moveSpeed
 
     def rotate(self):
         mouseX, mouseY = pygame.mouse.get_pos()
         relX, relY = mouseX - self.x, mouseY - self.y
-        self.angle = (180 / math.pi) * -math.atan2(relY, relX)
+        self.radians = math.atan2(relY, relX)  # positive Atan because TOWARDS
+        self.angle = (180 / math.pi) * -self.radians
         self.image = pygame.transform.rotate(self.texture, int(self.angle) - 90)
         self.rect = self.image.get_rect(center=(self.x, self.y))
 
@@ -107,6 +132,7 @@ class Player:
         self.ammoStash = 999
         self.spread = 0 # in radians
         self.autoFire = False
+        self.damage = 1
         self.shotSize = 5
 
     def shoot(self, bullets=1):
@@ -126,10 +152,13 @@ class Player:
             if self.ammo <= 0 and self.ammoStash <= 0 and self.weapon != 'revolver':
                 self.dropWeapon()
             player1.cooldownCounter = player1.cooldown
+            FX_List.append(fx_muzzleflash(self.x, self.y, self.radians))
 
     def reload(self):
         # fill ammo to max, if stash higher than capacity minus already loaded bullets
-        if self.ammoStash >= self.ammoCapacity - self.ammo:
+        if self.ammo == self.ammoCapacity:
+            return
+        elif self.ammoStash >= self.ammoCapacity - self.ammo:
             self.ammoStash -= self.ammoCapacity - self.ammo
             self.ammo = self.ammoCapacity
             self.cooldownCounter = self.reloadTime
@@ -147,17 +176,19 @@ class Player:
 player1 = Player(playerPos[0], playerPos[1])
 
 class Enemy:
-    def __init__(self, x, y,):
+    def __init__(self, x, y):
+        self.scoreVal = 10
+        self.dropchance = 20
+        self.hitboxSize = 10
+        self.health = 1
         self.x = x
         self.y = y
         self.angle = 0
+        self.radians = 0
         self.speed = 2
         self.velX = 0
         self.velY = 0
-        self.dropchance = 20
-
-        self.scoreVal = 10
-        self.texture = pygame.image.load('char_terrorist.png')
+        self.texture = pygame.image.load('char_zombie.png')
         self.image = pygame.transform.rotate(self.texture, int(self.angle))
 
     def rotate(self):
@@ -180,6 +211,22 @@ class Enemy:
         imageRect.center = self.x, self.y
         playSurface.blit(self.image, imageRect)
         # HealthBarDrawer(pos, team[index].health, team[index].maxHealth)
+
+class LargeEnemy(Enemy):
+    def __init__(self, x, y):
+        self.hitboxSize = 15
+        self.health = 2
+        self.dropchance = 50
+        self.scoreVal = 30
+        self.x = x
+        self.y = y
+        self.angle = 0
+        self.radians = 0
+        self.speed = 1
+        self.velX = 0
+        self.velY = 0
+        self.texture = pygame.image.load('char_largeZombie.png')
+        self.image = pygame.transform.rotate(self.texture, int(self.angle))
 
 class Drop:
     lifetime = 200
@@ -232,6 +279,7 @@ class Pistol(Drop):
         player1.cooldown = 1
         player1.reloadTime = 20
         player1.shotSize = 6
+        player1.damage = 2
 
 class Uzi(Drop):
     def __init__(self, x, y):
@@ -313,8 +361,40 @@ class FX:
         imageRect.center = self.x, self.y
         blit_alpha(playSurface, self.image, imageRect, self.alpha)
 
+class fx_muzzleflash(FX):
+    def __init__(self, x, y, radians):
+        self.radians = radians
+        self.offset = 40
+        self.angle = (180 / math.pi) * self.radians
+        self.x = x + (self.offset * math.cos(self.radians))
+        self.y = y + (self.offset * math.sin(self.radians))
+        #self.angle = angle
+
+
+        self.lifetime = 5
+        self.alphaStep = self.alpha / self.lifetime
+        self.texture = pygame.image.load('fx_muzzleflash.png')
+        self.texture.set_alpha(100)
+        self.image = pygame.transform.rotate(self.texture, int(self.angle)*-1)
+
 class fx_bloodsplatter(FX):
-    def __init__(self, x, y, angle, radians):
+    def __init__(self, x, y, radians):
+        self.radians = radians
+        self.offset = -30
+        self.angle = (180 / math.pi) * self.radians
+        self.x = x + (self.offset * math.cos(self.radians))
+        self.y = y + (self.offset * math.sin(self.radians))
+        #self.angle = angle
+
+
+        self.lifetime = 5
+        self.alphaStep = self.alpha / self.lifetime
+        self.texture = pygame.image.load('fx_blood.png')
+        self.texture.set_alpha(100)
+        self.image = pygame.transform.rotate(self.texture, int(self.angle)*-1)
+
+class fx_deadEnemy(FX):
+    def __init__(self, x, y, radians):
         self.radians = radians
         self.offset = -20
         self.angle = (180 / math.pi) * self.radians
@@ -334,21 +414,17 @@ class fx_reloadBar(FX):
         self.alpha = 220  # hack using alpha as percent for this particular effect
         self.lifetime = player1.reloadTime
         self.alphaStep = self.alpha / self.lifetime
-        self.coords =   ([180, 400],
-                        [180++self.alpha, 400],
-                        [180+self.alpha, 420],
-                        [180, 420])
-
-        #self.texture = pygame.image.load('fx_body.png')
-        #self.texture.set_alpha(100)
+        self.coords =   ([0,0],
+                        [0,0],
+                        [0,0],
+                        [0,0])
 
     def render(self):
         pygame.draw.polygon(playSurface, white, self.coords)
-        self.coords = ([180, 400],
-                       [180 + +self.alpha, 400],
-                       [180 + self.alpha, 420],
-                       [180, 420])
-
+        self.coords =   ([110, screenHeight - 95],
+                        [110+self.alpha, screenHeight - 95],
+                        [110+self.alpha, screenHeight - 75],
+                        [110, screenHeight - 75])
 
 FX_List = []
 
@@ -358,23 +434,24 @@ direction = ''
 def renderBG():
     '''
     bg = pygame.image.load('dirt.jpg')
-    bg = pygame.transform.scale(bg, (PSwith, PSheight))
+    bg = pygame.transform.scale(bg, (screenWidth, screenHeight))
     bgRect = bg.get_rect()
-    bgRect.center = PSwith / 2, PSheight / 2
+    bgRect.center = screenWidth / 2, screenHeight / 2
     playSurface.blit(bg, bgRect)
     playSurface.fill(alphaGrey,None,8)
     '''
-    playSurface.fill(brown)
+    playSurface.fill(darkBlue)
 
 
 def paused():
     global pause
     print('## PAUSE ##')
+    pygame.event.set_grab(False)
 
     pauseText = pygame.font.SysFont("monaco", 115)
     pauseSurf = pauseText.render("||", True, red)
     pauseRect = pauseSurf.get_rect()
-    pauseRect.center = (PSheight / 2, PSwith / 2)
+    pauseRect.center = (screenHeight / 2, screenWidth / 2)
     playSurface.blit(pauseSurf, pauseRect)
     pygame.display.flip()
 
@@ -385,6 +462,7 @@ def paused():
                 quit()
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_SPACE:
+                    pygame.event.set_grab(False)
                     pause = False
                 if event.key == pygame.K_ESCAPE:
                     pygame.quit()
@@ -400,7 +478,7 @@ def gameOver():
     GOFont = pygame.font.SysFont('monaco', 72)
     GOsurf = GOFont.render('Game over!', True, red)
     GOrect = GOsurf.get_rect()
-    GOrect.midtop = (PSwith/2, PSheight/2)
+    GOrect.midtop = (screenWidth/2, screenHeight/2)
 
     while True: # postgameLoop
         for event in pygame.event.get():
@@ -433,8 +511,8 @@ def gameOver():
                         highScores.close
 
                         # show highScores Loop (until quit)
-                        playSurface.fill(brown)
-                        counter = PSheight/12
+                        playSurface.fill(darkBlue)
+                        counter = screenHeight/12
                         place = 1
                         alreadySet = False
                         for entry in highScoresListOfLists:
@@ -445,15 +523,14 @@ def gameOver():
                             else:
                                 highScoreSurf = highScoreFont.render(str(place) + '.    ' + 'pts, '.join(entry), True, black)
                             highScoreRect = highScoreSurf.get_rect()
-                            highScoreRect.midtop = (PSwith / 2, PSheight / 12 - 30 + counter)
-                            counter += PSheight/12
+                            highScoreRect.midtop = (screenWidth / 2, screenHeight / 12 - 30 + counter)
+                            counter += screenHeight/12
                             place += 1
                             playSurface.blit(highScoreSurf, highScoreRect)
                         pygame.display.flip()
 
-                        highScores.close
 
-                        while True:
+                        while True: # endless loop until quit; displaying scoreboard
                             for event in pygame.event.get():
                                 if event.type == pygame.QUIT:  # Quit logic
                                     pygame.quit()
@@ -463,10 +540,6 @@ def gameOver():
                                         print('K_ESCAPE')
                                         pygame.quit()
                                         sys.exit()
-
-                            #print('highScoresList: ', '\n', highScoresList)
-                        #print('highScoreDict: ', '\n', highScoresDict)
-                        #highScores.close
 
                     elif event.key == pygame.K_ESCAPE:
                         print('K_ESCAPE')
@@ -478,15 +551,19 @@ def gameOver():
         nameLabelFont = pygame.font.SysFont('monaco', 40)
         nameLabelSurf = nameLabelFont.render('Enter your Name', True, black)
         nameLabelRect = nameLabelSurf.get_rect()
-        nameLabelRect.midtop = (PSwith / 2, PSheight / 5*3)
+        nameLabelRect.midtop = (screenWidth / 2, screenHeight/2 + 100)
 
         nameFont = pygame.font.SysFont('monaco', 40)
         nameSurf = nameFont.render(nameInput, True, white)
         nameRect = nameSurf.get_rect()
-        nameRect.midtop = (PSwith / 2, PSheight / 5*4)
+        nameRect.midtop = (screenWidth / 2, screenHeight/2 + 140)
 
         # Rendering BG
-        playSurface.fill(brown)
+        playSurface.fill(darkBlue)
+
+        # Rendering particles
+        for particle in my_shots:
+            particle.render()
 
         # Rendering FX
         for effect in FX_List:
@@ -501,10 +578,6 @@ def gameOver():
             enemy.render()
             enemy.rotate()
 
-        # Rendering particles
-        for particle in my_shots:
-            particle.render()
-
         # Rendering drop items
         for drop in dropList:
             drop.render()
@@ -512,35 +585,53 @@ def gameOver():
         playSurface.blit(GOsurf, GOrect)
         playSurface.blit(nameLabelSurf, nameLabelRect)
         playSurface.blit(nameSurf, nameRect)
-        showScore(gameOverBool)
+        renderUI(gameOverBool)
         pygame.display.flip()
 
     time.sleep(5)
     pygame.quit()
     sys.exit()
 
-# Score Func
-def showScore(GO=0, playerweapon=''):
-    ammoFont = pygame.font.SysFont('monaco', 24)
-    ammoSurf = ammoFont.render('Ammo: '+ str(player1.ammo) + ' / ' + str(player1.ammoStash), True, black)
+# UI Funcs
+def renderUI(GO=0, playerweapon=''):
+    ammoFont = pygame.font.SysFont('monaco', 40)
+    ammoSurf = ammoFont.render('Ammo: '+ str(player1.ammo) + ' / ' + str(player1.ammoStash), True, white)
     ammoRect = ammoSurf.get_rect()
 
-    scoreFont = pygame.font.SysFont('monaco', 24)
-    scoreSurf = scoreFont.render('Score: '+ str(score), True, black)
-    ScoreRect = scoreSurf.get_rect()
+    warningFont = pygame.font.SysFont('monaco', 40)
+    warningSurf = warningFont.render('Ammo: '+ str(player1.ammo), True, red)
+    warningRect = warningSurf.get_rect()
+
+    scoreFont = pygame.font.SysFont('monaco', 40)
+    scoreSurf = scoreFont.render('Score: '+ str(score), True, white if GO==0 else black)
+    scoreRect = scoreSurf.get_rect()
+
+    timeFont = pygame.font.SysFont('monaco', 40)
+    timeSurf = timeFont.render('Time: ' + str(('%02d:%02d' % (gameClock[0], gameClock[1]))), True, white)
+    timeRect = timeSurf.get_rect()
+
+
     if GO == 0:
-        ScoreRect.midtop = (100, 15)
-        ammoRect.midtop = (100, 400)
-    else:
-        ScoreRect.midtop = (PSwith/2, PSheight/2 + 70)
-    playSurface.blit(scoreSurf, ScoreRect)
-    if GO == 0:
+        scoreRect.midleft = (50, 50)
+        ammoRect.midleft = (50, screenHeight-50)
+        timeRect.midright = (screenWidth-50, screenHeight - 50)
+        warningRect.midleft = (50, screenHeight - 50)
         playSurface.blit(ammoSurf, ammoRect)
+        playSurface.blit(scoreSurf, scoreRect)
+        playSurface.blit(timeSurf, timeRect)
+        if player1.ammoWarning:
+            playSurface.blit(warningSurf, warningRect)
+            player1.ammoWarning -= 1
+    else:
+        scoreRect.midtop = (screenWidth/2, screenHeight/2 + 60)
+        playSurface.blit(scoreSurf, scoreRect)
+
 
     ### render weapon besides ammo:
     texture = player1.weaponSprite
+    texture = pygame.transform.scale(texture, (50, 50))
     imageRect = texture.get_rect()
-    imageRect.center = (20, 400)
+    imageRect.bottomleft = (50, screenHeight-60)
     playSurface.blit(texture, imageRect)
 
 
@@ -567,9 +658,12 @@ while True:
         if event.type == pygame.QUIT: #Quit logic
             pygame.quit()
             sys.exit()
-        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1 and player1.ammo > 0: # single shot, if revolver
-            player1.shoot(8 if player1.weapon == 'shotgun' else 1)
-            player1.autoFire = True
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1: # single shot, if revolver
+            if player1.ammo > 0:
+                player1.shoot(8 if player1.weapon == 'shotgun' else 1)
+                player1.autoFire = True
+            else:
+                player1.ammoWarning = 3
         if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
             player1.autoFire = False
         if event.type == pygame.KEYDOWN:
@@ -586,10 +680,6 @@ while True:
     if player1.autoFire and player1.weapon == 'uzi' and player1.ammo > 0: # Todo: should work with second player param. like 'autofireCapability'
         player1.shoot()
 
-    # mouse lookAt constraint
-    #mouseX, mouseY = pygame.mouse.get_pos()
-    #relX, relY = mouseX -
-
     # get player movement
     keys = pygame.key.get_pressed()
     player1.move(keys)
@@ -603,59 +693,52 @@ while True:
 
     # spawn enemies
     #if enemySpawn and len(enemyList) < (enemyCount + score //100): # TEMP difficulty increase
-    if gameTime/2 % spawnFrequency == 0:  # Todo: create better spawning/difficulty curve
+    if gameTime/2 % spawnFrequency == 0 and len(enemyList) < (enemyCount + score //20):  # Todo: create better spawning/difficulty curve
         spawnEdges = [
-                    (random.randint(0, PSwith/10)*10, 0),
-                    (PSwith/10*10, random.randint(0, PSheight/10)*10),
-                    (random.randint(0, PSwith/10)*10, PSwith/10*10),
-                    (0, PSwith/10*10 )
+                    (random.randint(0, screenWidth/10)*10, 0),
+                    (screenWidth/10*10, random.randint(0, screenHeight/10)*10),
+                    (random.randint(0, screenWidth/10)*10, screenWidth/10*10),
+                    (0, screenWidth/10*10 )
                     ]
         randX, randY = random.choice(spawnEdges)
 
-        token = Enemy(randX, randY)
+        token = random.choice([Enemy(randX, randY),
+                               Enemy(randX, randY),
+                               Enemy(randX, randY),
+                               LargeEnemy(randX, randY)]) # hacking a 3 to 1 ratio
         enemyList.append(token)
-        if spawnFrequency > 10:
+        if spawnFrequency > 5:
             spawnFrequency -= 1
 
     # remove projectiles, when out of bound
-    my_shots[:] = [shot for shot in my_shots if not shot.x <= 0 or shot.x >= PSwith and not shot.y <= 0 or shot.y >= PSheight] # TODO: comment on why using slice etc..
-    #for shot in my_shots:
-    #    if shot.x <= 0 or shot.x >= PSwith:
-    #        my_shots.remove(shot)
-    #    elif shot.y <= 0 or shot.y >= PSheight:
-    #        my_shots.remove(shot)
+    my_shots[:] = [shot for shot in my_shots if not shot.x <= 0 or shot.x >= screenWidth and not shot.y <= 0 or shot.y >= screenHeight] # TODO: comment on why using slice etc..
 
-    # check projectile hits
+    # check projectile hits/kill
     for shot in my_shots:
         enemyDeathList = []
         for enemy in enemyList:
-            if (shot.x > enemy.x-10 and shot.x < enemy.x+10) and (shot.y > enemy.y-10 and shot.y < enemy.y+10):
-                if random.randint(1, 100) < enemy.dropchance:
-                    dropList.append(random.choice([
-                                                    Ammo(enemy.x, enemy.y),
-                                                    Ammo(enemy.x, enemy.y),  # just upping the chance for ammo
-                                                    Pistol(enemy.x, enemy.y),
-                                                    Uzi(enemy.x, enemy.y),
-                                                    Shotgun(enemy.x, enemy.y)
-                                                   ]))
-                    print('## DROP DROPPED: ', dropList[-1])
-                score += enemy.scoreVal
-                FX_List.append(fx_bloodsplatter(enemy.x, enemy.y, enemy.angle, enemy.radians))
-                enemyDeathList.append(enemy)
-                #enemyList.remove(enemy)
+            if (shot.x > enemy.x - enemy.hitboxSize and shot.x < enemy.x + enemy.hitboxSize) and (shot.y > enemy.y - enemy.hitboxSize and shot.y < enemy.y + enemy.hitboxSize): # check if shot collides
+                if enemy.health - player1.damage <= 0: # check if shot kills
+                    if random.randint(1, 100) < enemy.dropchance:
+                        dropList.append(random.choice([
+                                                        Ammo(enemy.x, enemy.y),
+                                                        Ammo(enemy.x, enemy.y),  # just upping the chance for ammo
+                                                        Pistol(enemy.x, enemy.y),
+                                                        Uzi(enemy.x, enemy.y),
+                                                        Shotgun(enemy.x, enemy.y)
+                                                       ]))
+                        print('## DROP DROPPED: ', dropList[-1])
+                    score += enemy.scoreVal
+                    FX_List.append(fx_deadEnemy(enemy.x, enemy.y, enemy.radians))  # ToDo: crashbug: AttributeError: 'Enemy' object has no attribute 'radians'
+                    enemyDeathList.append(enemy) # append to list, and then remove all from said list, to avoid .remove inside for loop
+                else: # if does not kill, do damage
+                    enemy.health -= player1.damage
+                # in either case, do following
+                FX_List.append(fx_bloodsplatter(enemy.x, enemy.y, enemy.radians))
                 shot.penetration -= 1
                 shot.colour = red
-        for token in enemyDeathList:
-            enemyList.remove(token)
+        enemyList[:] = [x for x in enemyList if x not in enemyDeathList]
         my_shots[:] = [x for x in my_shots if not x.penetration <= 0] # better then .remove inside for loop
-        #if shot.penetration <= 0:
-        #    try:
-        #        my_shots.remove(shot)
-        #    except ValueError:  #
-        #       print('############### WARNING: SHOT NOT IN MY_SHOTS; CANT REMOVE!!! ############')
-        #       time.sleep(10)
-
-
 
     #check drop pickup
     for drop in dropList:
@@ -708,12 +791,20 @@ while True:
     if player1.cooldownCounter > 0:
         player1.cooldownCounter -= 1
 
-    showScore(gameOverBool)
+    renderUI(gameOverBool)
 
     pygame.display.flip()
 
+    # timer:
     gameTime += 1
     if gameTime % 30 == 0:
         print('gameTime: ', gameTime/30, ' | spawnfrequency: ', spawnFrequency)
+    minutes = (gameTime//30)//60
+    seconds = (gameTime//30) - minutes * 60
+    gameClock = minutes, seconds
+
+
+
+
     fpsController.tick(30)
 
