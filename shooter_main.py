@@ -6,6 +6,7 @@ Main Ideas and ToDo:
 - new perk-drops (shield,speedboost, infiniteammo, etc...)
 - new monsters
 - encrypt highscore file
+- add health and healthbar for player
 
 Maintanance:
 - ammoWarning system is quite hacked, optimize!
@@ -57,26 +58,29 @@ alphaGrey = pygame.Color(128,128,128,128)
 alphaBlack = pygame.Color(0,0,0,128)
 alphaRed = pygame.Color(255,0,0,128)
 
-# FPS controller
+# FPS controller and timer
 fpsController = pygame.time.Clock()
 gameTime = 0  # time in frames
 
 # Important Game Vars
 gameClock = (0,0)
-
-playerPos = [230, 230]
-my_shots = []
+playerPos = [screenWidth/2, screenHeight/2]
+shotList = []
 score = 0
 pause = False
+gameOverBool = False
+
+# UI settings
+healthBarW = 200
+healthBarH = 10
+
+dropList = []
+explosionList = []
 
 enemyList = []
 enemySpawn = True
 enemyCount = 3
 spawnFrequency = 20
-
-dropList = []
-
-gameOverBool = False
 
 
 # Player Class
@@ -87,6 +91,8 @@ class Player:
         self.angle = 0
         self.moveSpeed = 5
         self.texture = pygame.image.load('char_policemen.png')
+        self.maxHealth = 50
+        self.health = self.maxHealth
         self.cooldownCounter = 0
         self.dropWeapon()
         self.shotSize = 5
@@ -119,7 +125,6 @@ class Player:
         imageRect = self.image.get_rect()
         imageRect.center = self.x, self.y
         playSurface.blit(self.image, imageRect)
-        # HealthBarDrawer(pos, team[index].health, team[index].maxHealth)
 
     def dropWeapon(self):
         self.weaponSprite = pygame.image.load('wpn_revolver.png')
@@ -147,7 +152,7 @@ class Player:
             radians = math.atan2(*offset)
             for i in range(bullets):
                 angle = (radians - math.pi) + (random.randint(-self.spread, self.spread)) * 0.1
-                my_shots.append(Projectile(sourceX, sourceY, angle, self.weaponPenetration, self.shotSize))
+                shotList.append(Projectile(sourceX, sourceY, angle, self.weaponPenetration, self.shotSize))
             self.ammo -= 1
             if self.ammo <= 0 and self.ammoStash <= 0 and self.weapon != 'revolver':
                 self.dropWeapon()
@@ -177,15 +182,16 @@ player1 = Player(playerPos[0], playerPos[1])
 
 class Enemy:
     def __init__(self, x, y):
-        self.scoreVal = 10
-        self.dropchance = 20
+        self.damage = 1
         self.hitboxSize = 10
         self.health = 1
+        self.dropchance = 20
+        self.scoreVal = 10
         self.x = x
         self.y = y
         self.angle = 0
         self.radians = 0
-        self.speed = 2
+        self.moveSpeed = 2
         self.velX = 0
         self.velY = 0
         self.texture = pygame.image.load('char_zombie.png')
@@ -198,8 +204,8 @@ class Enemy:
         self.angle = (180 / math.pi) * self.radians
         self.image = pygame.transform.rotate(self.texture, int(self.angle)*-1)
         self.rect = self.image.get_rect(center=(self.x, self.y))
-        self.velX = self.speed * math.cos(self.radians)
-        self.velY = self.speed * math.sin(self.radians)
+        self.velX = self.moveSpeed * math.cos(self.radians)
+        self.velY = self.moveSpeed * math.sin(self.radians)
 
     def move(self):
         self.x += self.velX
@@ -210,10 +216,10 @@ class Enemy:
         imageRect = self.image.get_rect()
         imageRect.center = self.x, self.y
         playSurface.blit(self.image, imageRect)
-        # HealthBarDrawer(pos, team[index].health, team[index].maxHealth)
 
 class LargeEnemy(Enemy):
     def __init__(self, x, y):
+        self.damage = 4
         self.hitboxSize = 15
         self.health = 2
         self.dropchance = 50
@@ -222,7 +228,7 @@ class LargeEnemy(Enemy):
         self.y = y
         self.angle = 0
         self.radians = 0
-        self.speed = 1
+        self.moveSpeed = 1
         self.velX = 0
         self.velY = 0
         self.texture = pygame.image.load('char_largeZombie.png')
@@ -329,6 +335,55 @@ class Shotgun(Drop):
         player1.reloadTime = 40
         player1.shotSize = 3
 
+class Health(Drop):
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+        self.alphaStep = self.alpha / self.lifetime
+        self.texture = pygame.image.load('drop_health.png')
+        self.image = self.texture
+
+    def pickup(self):
+        print('Health picked up!')
+        self.heal = 10
+        if player1.health != player1.maxHealth:
+            if player1.health + self.heal > player1.maxHealth:
+                player1.health = player1.maxHealth
+            else:
+                player1.health += self.heal
+
+class Bomb(Drop):
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+        self.alphaStep = self.alpha / self.lifetime
+        self.texture = pygame.image.load('drop_bomb.png')
+        self.image = self.texture
+
+        self.damage = 1
+        self.radius = 32
+        self.maxRadius = 600
+        self.speed = 20
+        self.width = 2
+        self.lifetime = self.maxRadius / self.speed
+
+    def pickup(self):
+        print('Bomb picked up!')
+        explosionList.append(self)
+        self.alphaStep = self.alpha / self.lifetime
+
+    def render(self):
+        #pygame.draw.circle(playSurface, blue, (int(self.x), int(self.y)), self.radius, self.width)
+        imageRect = self.image.get_rect()
+        imageRect.center = self.x, self.y
+        blit_alpha(playSurface, self.image, imageRect, self.alpha)
+
+    def update(self):
+        self.image = pygame.transform.scale(self.texture, (self.radius * 2, self.radius * 2))
+        self.radius += self.speed
+        if self.radius >= self.maxRadius:
+            explosionList.remove(self)
+
 
 # Projectile Class
 class Projectile:
@@ -371,7 +426,7 @@ class fx_muzzleflash(FX):
         #self.angle = angle
 
 
-        self.lifetime = 5
+        self.lifetime = 3
         self.alphaStep = self.alpha / self.lifetime
         self.texture = pygame.image.load('fx_muzzleflash.png')
         self.texture.set_alpha(100)
@@ -387,7 +442,7 @@ class fx_bloodsplatter(FX):
         #self.angle = angle
 
 
-        self.lifetime = 5
+        self.lifetime = 3
         self.alphaStep = self.alpha / self.lifetime
         self.texture = pygame.image.load('fx_blood.png')
         self.texture.set_alpha(100)
@@ -403,7 +458,7 @@ class fx_deadEnemy(FX):
         #self.angle = angle
 
 
-        self.lifetime = 80
+        self.lifetime = 200
         self.alphaStep = self.alpha / self.lifetime
         self.texture = pygame.image.load('fx_body.png')
         self.texture.set_alpha(100)
@@ -428,20 +483,40 @@ class fx_reloadBar(FX):
 
 FX_List = []
 
+def dropTable(x,y):
+    drop = random.choice((
+            # ammo:
+            Ammo(enemy.x, enemy.y),
+            Ammo(enemy.x, enemy.y),     # just upping the chance for ammo
+            Ammo(enemy.x, enemy.y),     # just upping the chance for ammo
+            # perks:
+            Health(enemy.x, enemy.y),
+            Bomb(enemy.x, enemy.y),
+            # weapons:
+            Pistol(enemy.x, enemy.y),
+            Uzi(enemy.x, enemy.y),
+            Shotgun(enemy.x, enemy.y)
+    ))
+    return drop
+
 # Direction Vars
 direction = ''
 
 def renderBG():
-    '''
+
     bg = pygame.image.load('dirt.jpg')
     bg = pygame.transform.scale(bg, (screenWidth, screenHeight))
     bgRect = bg.get_rect()
     bgRect.center = screenWidth / 2, screenHeight / 2
     playSurface.blit(bg, bgRect)
     playSurface.fill(alphaGrey,None,8)
-    '''
-    playSurface.fill(darkBlue)
+    #playSurface.fill(darkBlue)
 
+    vignetteTex = pygame.image.load('vignette.jpg')
+    vignetteTex = pygame.transform.scale(vignetteTex, (screenWidth, screenHeight))
+    vignetteRect = vignetteTex.get_rect()
+    vignetteRect.center = screenWidth / 2, screenHeight / 2
+    playSurface.blit(vignetteTex, vignetteRect, special_flags = 3)
 
 def paused():
     global pause
@@ -559,10 +634,10 @@ def gameOver():
         nameRect.midtop = (screenWidth / 2, screenHeight/2 + 140)
 
         # Rendering BG
-        playSurface.fill(darkBlue)
+        renderBG()
 
         # Rendering particles
-        for particle in my_shots:
+        for particle in shotList:
             particle.render()
 
         # Rendering FX
@@ -633,6 +708,21 @@ def renderUI(GO=0, playerweapon=''):
     imageRect = texture.get_rect()
     imageRect.bottomleft = (50, screenHeight-60)
     playSurface.blit(texture, imageRect)
+    renderHealthbar((50, screenHeight - 30), player1.health, player1.maxHealth)
+
+def renderHealthbar(pos, health, maxHealth):
+    fraction = int(healthBarW / maxHealth)  # gets pixel-width of each healthbar sub portions (rounded as an integer)
+    maxBar =  [[pos[0], pos[1]],
+               [pos[0] + healthBarW, pos[1]],
+               [pos[0] + healthBarW, pos[1] + healthBarH],
+               [pos[0], pos[1] + healthBarH]]
+    currentBar = [[pos[0], pos[1] + healthBarH],
+                  [pos[0] + (health * fraction), pos[1] + healthBarH],
+                  [pos[0] + (health * fraction), pos[1]],
+                  [pos[0], pos[1]]]
+    pygame.draw.polygon(playSurface, red, maxBar , 0)  # draw red base
+    pygame.draw.polygon(playSurface, green, currentBar, 0)  # draw green partial overlay
+    pygame.draw.polygon(playSurface, white, maxBar, 2)  # draw white frame overlay
 
 
 # draw with alpha
@@ -649,6 +739,9 @@ def pickupCheck(object):
     if (object.x > player1.x - 15 and object.x < player1.x + 15) and (object.y > player1.y - 15 and object.y < player1.y + 15):
         object.pickup()
         dropList.remove(object)
+
+def calculateDistance(pointA, pointB):
+    return math.sqrt( (pointA[0]-pointB[0])**2  + (pointA[0]-pointB[0])**2)
 
 
 ''' #################### MAIN LOOP ############################## '''
@@ -711,25 +804,19 @@ while True:
             spawnFrequency -= 1
 
     # remove projectiles, when out of bound
-    my_shots[:] = [shot for shot in my_shots if not shot.x <= 0 or shot.x >= screenWidth and not shot.y <= 0 or shot.y >= screenHeight] # TODO: comment on why using slice etc..
+    shotList[:] = [shot for shot in shotList if not shot.x <= 0 or shot.x >= screenWidth and not shot.y <= 0 or shot.y >= screenHeight] # TODO: comment on why using slice etc..
 
     # check projectile hits/kill
-    for shot in my_shots:
+    for shot in shotList:
         enemyDeathList = []
         for enemy in enemyList:
             if (shot.x > enemy.x - enemy.hitboxSize and shot.x < enemy.x + enemy.hitboxSize) and (shot.y > enemy.y - enemy.hitboxSize and shot.y < enemy.y + enemy.hitboxSize): # check if shot collides
                 if enemy.health - player1.damage <= 0: # check if shot kills
                     if random.randint(1, 100) < enemy.dropchance:
-                        dropList.append(random.choice([
-                                                        Ammo(enemy.x, enemy.y),
-                                                        Ammo(enemy.x, enemy.y),  # just upping the chance for ammo
-                                                        Pistol(enemy.x, enemy.y),
-                                                        Uzi(enemy.x, enemy.y),
-                                                        Shotgun(enemy.x, enemy.y)
-                                                       ]))
+                        dropList.append(dropTable(enemy.x, enemy.y))
                         print('## DROP DROPPED: ', dropList[-1])
                     score += enemy.scoreVal
-                    FX_List.append(fx_deadEnemy(enemy.x, enemy.y, enemy.radians))  # ToDo: crashbug: AttributeError: 'Enemy' object has no attribute 'radians'
+                    FX_List.append(fx_deadEnemy(enemy.x, enemy.y, enemy.radians))
                     enemyDeathList.append(enemy) # append to list, and then remove all from said list, to avoid .remove inside for loop
                 else: # if does not kill, do damage
                     enemy.health -= player1.damage
@@ -738,17 +825,49 @@ while True:
                 shot.penetration -= 1
                 shot.colour = red
         enemyList[:] = [x for x in enemyList if x not in enemyDeathList]
-        my_shots[:] = [x for x in my_shots if not x.penetration <= 0] # better then .remove inside for loop
+        shotList[:] = [x for x in shotList if not x.penetration <= 0] # better then .remove inside for loop
+
+    # check explosion hits
+    enemyDeathList = []
+    for explosion in explosionList:
+        for enemy in enemyList:
+            # checks if outside of explosion radius-sized square, then no (expensive) calculateDistance() is necessary
+            if abs(enemy.x - explosion.x) > explosion.radius or abs(enemy.y - explosion.y) > explosion.radius:
+                continue
+            #print('## possible explosion collision, calculating distance')
+            #time.sleep(1)
+            # now calculating the hypothenuse with pythagoras, to check if inside of radius
+            if calculateDistance((enemy.x, enemy.y), (explosion.x, explosion.y)) < explosion.radius:
+                #print('## explosion collision detected')
+                #time.sleep(5)
+                if enemy.health - player1.damage <= 0:  # check if shot kills
+                    if random.randint(1, 100) < enemy.dropchance:
+                        dropList.append(dropTable(enemy.x, enemy.y))
+                        print('## DROP DROPPED: ', dropList[-1])
+                    score += enemy.scoreVal
+                    FX_List.append(fx_deadEnemy(enemy.x, enemy.y, enemy.radians))
+                    enemyDeathList.append(enemy)
+                else:  # if does not kill, do damage
+                    enemy.health -= player1.damage
+                # in either case, do following
+                FX_List.append(fx_bloodsplatter(enemy.x, enemy.y, enemy.radians))
+                shot.penetration -= 1
+                shot.colour = red
+            enemyList[:] = [x for x in enemyList if x not in enemyDeathList]
+    enemyList[:] = [x for x in enemyList if x not in enemyDeathList]
+
 
     #check drop pickup
     for drop in dropList:
         pickupCheck(drop)
 
 
-    # GAME OVER when player touches enemy
+    # damage when player touches enemy
     for enemy in enemyList:
         if (player1.x > enemy.x - 15 and player1.x < enemy.x + 15) and (player1.y > enemy.y - 15 and player1.y < enemy.y + 15):
-            gameOver()
+            player1.health -= enemy.damage  # ToDo: enemy.damage
+            if player1.health < 1:
+                gameOver()
 
     # Rendering BG
     renderBG()
@@ -760,22 +879,30 @@ while True:
         if effect.alpha <= 0:
             FX_List.remove(effect)
 
-    # Rendering player
-    player1.rotate()
-    player1.render()
-    #pygame.draw.rect(playSurface, green, pygame.Rect(player1.x-1, player1.y-1, 3, 3))
-
     # Rendering enemies
     for enemy in enemyList:
         enemy.render()
         enemy.move()
         enemy.rotate()
-        #pygame.draw.rect(playSurface, green, pygame.Rect(enemy.x-1, enemy.y-1, 3, 3))
+        # pygame.draw.rect(playSurface, green, pygame.Rect(enemy.x-1, enemy.y-1, 3, 3))
+
+    # Rendering player
+    player1.rotate()
+    player1.render()
+    #pygame.draw.rect(playSurface, green, pygame.Rect(player1.x-1, player1.y-1, 3, 3))
 
     # Rendering particles
-    for particle in my_shots:
+    for particle in shotList:
         particle.render()
         particle.update()
+
+    # Rendering explosives
+    for explosion in explosionList:
+        explosion.render()
+        explosion.update()
+        explosion.alpha -= explosion.alphaStep # decrements the alpha by one step
+        if explosion.alpha <= 0:
+            explosionList.remove(explosion)
 
     # Rendering drop items
     for drop in dropList:

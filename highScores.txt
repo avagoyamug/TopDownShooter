@@ -1,10 +1,2 @@
-1440:Thilo
-1280:Thilo
-1100:Thilo
-970:Thilo
-810:Daniel
-810:Thilo
-760:Thilo
-570:Thilo
-530:Thilo
-520:Thilo
+1920:Thilo
+380:Thilo
