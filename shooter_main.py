@@ -1,12 +1,8 @@
 '''
 ##########################################################################################################
 Main Ideas and ToDo:
-- add animation system (general anim func)
-- new weapons, like flamethrower and rocketlauncher
-- new perk-drops (shield,speedboost, infiniteammo, etc...)
-- new monsters
+- new perk-drops (shield)
 - encrypt highscore file
-- add health and healthbar for player
 
 Maintanance:
 - ammoWarning system is quite hacked, optimize!
@@ -53,6 +49,7 @@ white = pygame.Color(255,255,255)
 black = pygame.Color(0,0,0)
 grey = pygame.Color(128,128,128)
 brown = pygame.Color(128,120,105)
+lightBlue = pygame.Color(80,225,255)
 darkBlue = pygame.Color(70,80,97)
 alphaGrey = pygame.Color(128,128,128,128)
 alphaBlack = pygame.Color(0,0,0,128)
@@ -81,6 +78,7 @@ enemyList = []
 enemySpawn = True
 enemyCount = 3
 spawnFrequency = 20
+difficulty = 0 # default; when increased, it increases the spawnchance for special zombies
 
 
 # Player Class
@@ -98,6 +96,10 @@ class Player:
         self.shotSize = 5
 
         self.ammoWarning = 0
+        self.infiniteAmmo = False
+        self.infiniteAmmoTimer = 0
+
+        self.speedboostTimer = 0
 
     def move(self, keys):
         if keys[pygame.K_RIGHT] or keys[pygame.K_d]:
@@ -126,6 +128,19 @@ class Player:
         imageRect.center = self.x, self.y
         playSurface.blit(self.image, imageRect)
 
+    def update(self):
+        if self.infiniteAmmoTimer > 0:
+            self.infiniteAmmoTimer -= 1
+            if self.infiniteAmmoTimer == 0:
+                self.infiniteAmmo = False
+        if self.ammoWarning > 0:
+            self.ammoWarning -= 1
+        if self.speedboostTimer > 0:
+            self.speedboostTimer -= 1
+            if self.speedboostTimer == 0:
+                self.moveSpeed = 5  # back to default
+
+
     def dropWeapon(self):
         self.weaponSprite = pygame.image.load('wpn_revolver.png')
         self.weapon = 'revolver'
@@ -152,8 +167,12 @@ class Player:
             radians = math.atan2(*offset)
             for i in range(bullets):
                 angle = (radians - math.pi) + (random.randint(-self.spread, self.spread)) * 0.1
-                shotList.append(Projectile(sourceX, sourceY, angle, self.weaponPenetration, self.shotSize))
-            self.ammo -= 1
+                if player1.weapon == 'flamethrower':
+                    shotList.append(FlameProjectile(sourceX, sourceY, angle, self.weaponPenetration, self.shotSize))
+                else:
+                    shotList.append(Projectile(sourceX, sourceY, angle, self.weaponPenetration, self.shotSize))
+            if not self.infiniteAmmo:
+                self.ammo -= 1
             if self.ammo <= 0 and self.ammoStash <= 0 and self.weapon != 'revolver':
                 self.dropWeapon()
             player1.cooldownCounter = player1.cooldown
@@ -181,21 +200,33 @@ class Player:
 player1 = Player(playerPos[0], playerPos[1])
 
 class Enemy:
+    animationStep = 0
+    animTime = 12
+
+    velX = 0
+    velY = 0
+    angle = 0
+    radians = 0
+
+    health = 1
+    spawnChance = 100
+    damage = 1
+    hitboxSize = 10
+    dropchance = 20
+    scoreVal = 10
+    moveSpeed = 2
+
     def __init__(self, x, y):
-        self.damage = 1
-        self.hitboxSize = 10
-        self.health = 1
-        self.dropchance = 20
-        self.scoreVal = 10
         self.x = x
         self.y = y
-        self.angle = 0
-        self.radians = 0
-        self.moveSpeed = 2
-        self.velX = 0
-        self.velY = 0
         self.texture = pygame.image.load('char_zombie.png')
         self.image = pygame.transform.rotate(self.texture, int(self.angle))
+
+    def animate(self):
+        self.animationStep += 1
+        if self.animationStep == self.animTime: # every 15 frames
+            self.texture = pygame.transform.flip(self.texture, False, True)
+            self.animationStep = 0
 
     def rotate(self):
         targetX, targetY = player1.x, player1.y
@@ -211,19 +242,39 @@ class Enemy:
         self.x += self.velX
         self.y += self.velY
 
-
     def render(self):
         imageRect = self.image.get_rect()
         imageRect.center = self.x, self.y
         playSurface.blit(self.image, imageRect)
 
-class LargeEnemy(Enemy):
+class FastEnemy(Enemy):
     def __init__(self, x, y):
-        self.damage = 4
-        self.hitboxSize = 15
-        self.health = 2
+        self.spawnChance = 5
+        self.damage = 5
+        self.hitboxSize = 12
+        self.health = 1
         self.dropchance = 50
         self.scoreVal = 30
+        self.animTime = 5
+        self.x = x
+        self.y = y
+        self.angle = 0
+        self.radians = 0
+        self.moveSpeed = 5
+        self.velX = 0
+        self.velY = 0
+        self.texture = pygame.image.load('char_fastZombie.png')
+        self.image = pygame.transform.rotate(self.texture, int(self.angle))
+
+class LargeEnemy(Enemy):
+    def __init__(self, x, y):
+        self.spawnChance = 15
+        self.damage = 5
+        self.hitboxSize = 15
+        self.health = 2
+        self.dropchance = 30
+        self.scoreVal = 30
+        self.animTime = 20
         self.x = x
         self.y = y
         self.angle = 0
@@ -234,9 +285,29 @@ class LargeEnemy(Enemy):
         self.texture = pygame.image.load('char_largeZombie.png')
         self.image = pygame.transform.rotate(self.texture, int(self.angle))
 
+class BossEnemy(Enemy):
+    def __init__(self, x, y):
+        self.spawnChance = 1
+        self.damage = 30
+        self.hitboxSize = 25
+        self.health = 30
+        self.dropchance = 100
+        self.scoreVal = 100
+        self.animTime = 30
+        self.x = x
+        self.y = y
+        self.angle = 0
+        self.radians = 0
+        self.moveSpeed = 1
+        self.velX = 0
+        self.velY = 0
+        self.texture = pygame.image.load('char_bossZombie.png')
+        self.image = pygame.transform.rotate(self.texture, int(self.angle))
+
 class Drop:
     lifetime = 200
     alpha = 255
+    spawnChance = 100
 
     def __init__(self, x, y,):
         self.x = x
@@ -253,7 +324,7 @@ class Ammo(Drop):
     def __init__(self, x, y):
         self.x = x
         self.y = y
-        self.ammo = 6
+        self.ammo = player1.ammoCapacity
         self.alphaStep = self.alpha / self.lifetime
         self.texture = pygame.image.load('wpn_ammo.png')
         self.image = self.texture
@@ -331,9 +402,59 @@ class Shotgun(Drop):
         player1.spread = 3
         player1.weaponPenetration = 1
         player1.weaponSprite = self.texture
-        player1.cooldown = 20
+        player1.cooldown = 15
         player1.reloadTime = 40
         player1.shotSize = 3
+
+class Flamethrower(Drop):
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+        self.alphaStep = self.alpha / self.lifetime
+        self.texture = pygame.image.load('wpn_flamethrower.png')
+        self.image = self.texture
+
+    def pickup(self):
+        print('Flamethrower picked up!')
+        if player1.weapon == 'flamethrower':
+            player1.ammoStash += 100
+            return
+        player1.weapon = 'flamethrower'
+        player1.ammo = 100
+        player1.ammoCapacity = 100
+        player1.ammoStash = 0
+        player1.spread = 3
+        player1.weaponPenetration = 1
+        player1.weaponSprite = self.texture
+        player1.cooldown = 1
+        player1.reloadTime = 40
+        player1.shotSize = 5
+        player1.damage = 0.5
+
+class Rocketlauncher(Drop):
+    def __init__(self, x, y):
+        self.spawnChance = 50
+        self.x = x
+        self.y = y
+        self.alphaStep = self.alpha / self.lifetime
+        self.texture = pygame.image.load('wpn_rocketlauncher.png')
+        self.image = self.texture
+
+    def pickup(self):
+        print('Rocketlauncher picked up!')
+        if player1.weapon == 'rocketlauncher':
+            player1.ammoStash += 10
+            return
+        player1.weapon = 'rocketlauncher'
+        player1.ammo = 5
+        player1.ammoCapacity = 5
+        player1.ammoStash = 5
+        player1.spread = 0
+        player1.weaponPenetration = 1
+        player1.weaponSprite = self.texture
+        player1.cooldown = 35
+        player1.reloadTime = 50
+        player1.shotSize = 10
 
 class Health(Drop):
     def __init__(self, x, y):
@@ -352,8 +473,39 @@ class Health(Drop):
             else:
                 player1.health += self.heal
 
+class InfiniteAmmo(Drop):
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+        self.alphaStep = self.alpha / self.lifetime
+        self.texture = pygame.image.load('drop_infiniteAmmo.png')
+        self.image = self.texture
+
+        self.time = 90
+
+    def pickup(self):
+        print('InfiniteAmmo picked up!')
+        player1.infiniteAmmo = True
+        player1.infiniteAmmoTimer = self.time
+
+class Speedboost(Drop):
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+        self.alphaStep = self.alpha / self.lifetime
+        self.texture = pygame.image.load('drop_speedboost.png')
+        self.image = self.texture
+
+        self.time = 60
+
+    def pickup(self):
+        print('InfiniteAmmo picked up!')
+        player1.moveSpeed = 10
+        player1.speedboostTimer = self.time
+
 class Bomb(Drop):
     def __init__(self, x, y):
+        self.spawnChance = 30
         self.x = x
         self.y = y
         self.alphaStep = self.alpha / self.lifetime
@@ -362,27 +514,15 @@ class Bomb(Drop):
 
         self.damage = 1
         self.radius = 32
-        self.maxRadius = 600
+        self.maxRadius = 300
         self.speed = 20
         self.width = 2
         self.lifetime = self.maxRadius / self.speed
 
     def pickup(self):
         print('Bomb picked up!')
-        explosionList.append(self)
-        self.alphaStep = self.alpha / self.lifetime
+        explosionList.append(fx_plasmaExplosion(self.x, self.y))
 
-    def render(self):
-        #pygame.draw.circle(playSurface, blue, (int(self.x), int(self.y)), self.radius, self.width)
-        imageRect = self.image.get_rect()
-        imageRect.center = self.x, self.y
-        blit_alpha(playSurface, self.image, imageRect, self.alpha)
-
-    def update(self):
-        self.image = pygame.transform.scale(self.texture, (self.radius * 2, self.radius * 2))
-        self.radius += self.speed
-        if self.radius >= self.maxRadius:
-            explosionList.remove(self)
 
 
 # Projectile Class
@@ -405,16 +545,83 @@ class Projectile:
         self.x -= self.velX
         self.y -= self.velY
 
+class FlameProjectile(Projectile):
+    def __init__(self, x, y, angle, penetration=1, size=5):
+        self.x = x
+        self.y = y
+        self.size = size
+        self.colour = pygame.Color(255,255,0,255)
+        self.angle = angle
+        self.speed = 10
+        self.lifetime = 15 + random.randint(-5, 5)
+        self.decay = 0
+        self.penetration = penetration
+        self.velX = self.speed * math.cos(self.angle)
+        self.velY = self.speed * math.sin(self.angle)
+
+    def render(self):
+        pygame.draw.circle(playSurface, self.colour, (int(self.x), int(self.y)), self.size, 0)
+
+    def update(self):
+        self.x -= self.velX
+        self.y -= self.velY
+        self.speed *= 0.75
+        self.size += 1
+        self.decay += 1
+        if self.decay >= self.lifetime:
+            shotList.remove(self)
+        if self.colour.g >= 10:
+            self.colour.g -= 10 + random.randint(-5,5)
+        if self.colour.g >= 10:
+            self.colour.a -= 10
+
+
 class FX:
     lifetime = 10
     angle = 0
     alpha = 255
 
-
     def render(self):
         imageRect = self.image.get_rect()
         imageRect.center = self.x, self.y
         blit_alpha(playSurface, self.image, imageRect, self.alpha)
+
+class fx_explosion(FX):
+    def __init__(self, x, y, type=''):
+        self.type = type
+        self.image = pygame.image.load('fx_explosion.png')
+        self.x, self.y = x, y
+        self.maxRadius = 100
+        self.speed = 20
+        self.damage = 3
+        self.radius = 16
+        self.width = 2
+        self.lifetime = self.maxRadius / self.speed
+        self.alphaStep = self.alpha / self.lifetime
+
+
+    def update(self):
+        # pygame.draw.circle(playSurface, blue, (int(self.x), int(self.y)), self.radius, self.width)
+        imageRect = self.image.get_rect()
+        imageRect.center = self.x, self.y
+        blit_alpha(playSurface, self.image, imageRect, self.alpha)
+        self.image = pygame.transform.scale(self.image, (self.radius * 2, self.radius * 2))
+        self.radius += self.speed
+        if self.radius >= self.maxRadius:
+            explosionList.remove(self)
+
+class fx_plasmaExplosion(fx_explosion):
+    def __init__(self, x, y, type='bomb'):
+        self.type = type
+        self.image = pygame.image.load('fx_plasma.png')
+        self.x, self.y = x, y
+        self.damage = 1
+        self.radius = 32
+        self.maxRadius = 350
+        self.speed = 20
+        self.width = 2
+        self.lifetime = self.maxRadius / self.speed
+        self.alphaStep = self.alpha / self.lifetime
 
 class fx_muzzleflash(FX):
     def __init__(self, x, y, radians):
@@ -458,7 +665,7 @@ class fx_deadEnemy(FX):
         #self.angle = angle
 
 
-        self.lifetime = 200
+        self.lifetime = 150
         self.alphaStep = self.alpha / self.lifetime
         self.texture = pygame.image.load('fx_body.png')
         self.texture.set_alpha(100)
@@ -484,20 +691,28 @@ class fx_reloadBar(FX):
 FX_List = []
 
 def dropTable(x,y):
-    drop = random.choice((
-            # ammo:
-            Ammo(enemy.x, enemy.y),
-            Ammo(enemy.x, enemy.y),     # just upping the chance for ammo
-            Ammo(enemy.x, enemy.y),     # just upping the chance for ammo
-            # perks:
-            Health(enemy.x, enemy.y),
-            Bomb(enemy.x, enemy.y),
-            # weapons:
-            Pistol(enemy.x, enemy.y),
-            Uzi(enemy.x, enemy.y),
-            Shotgun(enemy.x, enemy.y)
-    ))
-    return drop
+
+    spawning = True
+    while spawning:
+        drop = random.choice((
+                                 # ammo:
+                                 Ammo(enemy.x, enemy.y),
+                                 Ammo(enemy.x, enemy.y), # just a classy way of upping Ammo's dropchance
+                                 # perks:s
+                                 Health(enemy.x, enemy.y),
+                                 Bomb(enemy.x, enemy.y),
+                                 InfiniteAmmo(enemy.x, enemy.y),
+                                 Speedboost(enemy.x, enemy.y),
+                                 # weapons:
+                                 Pistol(enemy.x, enemy.y),
+                                 Uzi(enemy.x, enemy.y),
+                                 Shotgun(enemy.x, enemy.y),
+                                 Flamethrower(enemy.x, enemy.y),
+                                 Rocketlauncher(enemy.x, enemy.y)
+        ))
+        if random.randint(1, 100-difficulty) <= drop.spawnChance:
+            spawning = False
+            return drop
 
 # Direction Vars
 direction = ''
@@ -537,7 +752,7 @@ def paused():
                 quit()
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_SPACE:
-                    pygame.event.set_grab(False)
+                    pygame.event.set_grab(True)
                     pause = False
                 if event.key == pygame.K_ESCAPE:
                     pygame.quit()
@@ -677,6 +892,10 @@ def renderUI(GO=0, playerweapon=''):
     warningSurf = warningFont.render('Ammo: '+ str(player1.ammo), True, red)
     warningRect = warningSurf.get_rect()
 
+    infiniteAmmoFont = pygame.font.SysFont('monaco', 40)
+    infiniteAmmoSurf = infiniteAmmoFont.render('Ammo: '+ str(player1.ammo), True, lightBlue)
+    infiniteAmmoRect = infiniteAmmoSurf.get_rect()
+
     scoreFont = pygame.font.SysFont('monaco', 40)
     scoreSurf = scoreFont.render('Score: '+ str(score), True, white if GO==0 else black)
     scoreRect = scoreSurf.get_rect()
@@ -690,13 +909,15 @@ def renderUI(GO=0, playerweapon=''):
         scoreRect.midleft = (50, 50)
         ammoRect.midleft = (50, screenHeight-50)
         timeRect.midright = (screenWidth-50, screenHeight - 50)
-        warningRect.midleft = (50, screenHeight - 50)
         playSurface.blit(ammoSurf, ammoRect)
         playSurface.blit(scoreSurf, scoreRect)
         playSurface.blit(timeSurf, timeRect)
         if player1.ammoWarning:
+            warningRect.midleft = (50, screenHeight - 50)
             playSurface.blit(warningSurf, warningRect)
-            player1.ammoWarning -= 1
+        if player1.infiniteAmmo:
+            infiniteAmmoRect.midleft = (50, screenHeight - 50)
+            playSurface.blit(infiniteAmmoSurf, infiniteAmmoRect)
     else:
         scoreRect.midtop = (screenWidth/2, screenHeight/2 + 60)
         playSurface.blit(scoreSurf, scoreRect)
@@ -752,7 +973,7 @@ while True:
             pygame.quit()
             sys.exit()
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1: # single shot, if revolver
-            if player1.ammo > 0:
+            if player1.ammo > 0 or player1.infiniteAmmo:
                 player1.shoot(8 if player1.weapon == 'shotgun' else 1)
                 player1.autoFire = True
             else:
@@ -770,7 +991,7 @@ while True:
                 player1.reload()
                 player1.cooldownCounter = player1.reloadTime
 
-    if player1.autoFire and player1.weapon == 'uzi' and player1.ammo > 0: # Todo: should work with second player param. like 'autofireCapability'
+    if player1.autoFire and player1.weapon in ('uzi', 'flamethrower') and (player1.ammo > 0 or player1.infiniteAmmo): # Todo: should work with second player param. like 'autofireCapability'
         player1.shoot()
 
     # get player movement
@@ -783,25 +1004,35 @@ while True:
         dropList.append(Shotgun(player1.x, player1.y))
     if keys[pygame.K_F3] and cheatMode:
         dropList.append(Uzi(player1.x, player1.y))
+    if keys[pygame.K_F4] and cheatMode:
+        dropList.append(Flamethrower(player1.x, player1.y))
+    if keys[pygame.K_F5] and cheatMode:
+        dropList.append(Rocketlauncher(player1.x, player1.y))
 
     # spawn enemies
     #if enemySpawn and len(enemyList) < (enemyCount + score //100): # TEMP difficulty increase
     if gameTime/2 % spawnFrequency == 0 and len(enemyList) < (enemyCount + score //20):  # Todo: create better spawning/difficulty curve
         spawnEdges = [
-                    (random.randint(0, screenWidth/10)*10, 0),
-                    (screenWidth/10*10, random.randint(0, screenHeight/10)*10),
-                    (random.randint(0, screenWidth/10)*10, screenWidth/10*10),
-                    (0, screenWidth/10*10 )
+                    (random.randint(0, screenWidth/10)*10, 0), # N
+                    (screenWidth/10*10, random.randint(0, screenHeight/10)*10), # E
+                    (random.randint(0, screenWidth/10)*10, screenWidth/10*10), # S
+                    (0, random.randint(0, screenWidth/10)*10 ) # W
                     ]
         randX, randY = random.choice(spawnEdges)
 
-        token = random.choice([Enemy(randX, randY),
-                               Enemy(randX, randY),
-                               Enemy(randX, randY),
-                               LargeEnemy(randX, randY)]) # hacking a 3 to 1 ratio
-        enemyList.append(token)
+        spawning = True
+        while spawning:
+            token = random.choice([Enemy(randX, randY),
+                                   FastEnemy(randX, randY),
+                                   LargeEnemy(randX, randY),
+                                   BossEnemy(randX, randY)])
+            if random.randint(1, 100-difficulty) <= token.spawnChance:
+                enemyList.append(token)
+                spawning = False
         if spawnFrequency > 5:
             spawnFrequency -= 1
+        elif difficulty <80: #maximum difficulty
+            difficulty += 1
 
     # remove projectiles, when out of bound
     shotList[:] = [shot for shot in shotList if not shot.x <= 0 or shot.x >= screenWidth and not shot.y <= 0 or shot.y >= screenHeight] # TODO: comment on why using slice etc..
@@ -810,7 +1041,9 @@ while True:
     for shot in shotList:
         enemyDeathList = []
         for enemy in enemyList:
-            if (shot.x > enemy.x - enemy.hitboxSize and shot.x < enemy.x + enemy.hitboxSize) and (shot.y > enemy.y - enemy.hitboxSize and shot.y < enemy.y + enemy.hitboxSize): # check if shot collides
+            if (shot.x + shot.size/2 > enemy.x - enemy.hitboxSize and shot.x  - shot.size/2 < enemy.x + enemy.hitboxSize) and (shot.y + shot.size/2 > enemy.y - enemy.hitboxSize and shot.y  - shot.size/2 < enemy.y + enemy.hitboxSize): # check if shot collides
+                if player1.weapon == 'rocketlauncher':
+                    explosionList.append(fx_explosion(shot.x, shot.y))
                 if enemy.health - player1.damage <= 0: # check if shot kills
                     if random.randint(1, 100) < enemy.dropchance:
                         dropList.append(dropTable(enemy.x, enemy.y))
@@ -841,9 +1074,8 @@ while True:
                 #print('## explosion collision detected')
                 #time.sleep(5)
                 if enemy.health - player1.damage <= 0:  # check if shot kills
-                    if random.randint(1, 100) < enemy.dropchance:
+                    if random.randint(1, 100) < enemy.dropchance and explosion.type != 'bomb':# because bombs give to much loot
                         dropList.append(dropTable(enemy.x, enemy.y))
-                        print('## DROP DROPPED: ', dropList[-1])
                     score += enemy.scoreVal
                     FX_List.append(fx_deadEnemy(enemy.x, enemy.y, enemy.radians))
                     enemyDeathList.append(enemy)
@@ -881,6 +1113,7 @@ while True:
 
     # Rendering enemies
     for enemy in enemyList:
+        enemy.animate()
         enemy.render()
         enemy.move()
         enemy.rotate()
@@ -889,6 +1122,7 @@ while True:
     # Rendering player
     player1.rotate()
     player1.render()
+    player1.update()
     #pygame.draw.rect(playSurface, green, pygame.Rect(player1.x-1, player1.y-1, 3, 3))
 
     # Rendering particles
@@ -901,8 +1135,6 @@ while True:
         explosion.render()
         explosion.update()
         explosion.alpha -= explosion.alphaStep # decrements the alpha by one step
-        if explosion.alpha <= 0:
-            explosionList.remove(explosion)
 
     # Rendering drop items
     for drop in dropList:
